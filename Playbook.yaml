@@ -335,4 +335,61 @@
         msg: "Aborting playbook as compute nodes did not boot."
       when: user_confirmation.user_input | lower != 'yes'
       failed_when: user_confirmation.user_input | lower != 'yes'
-
+    
+    - name: Install OpenHPC Development Components
+      block:
+        - name: Install dev-tools
+          ansible.builtin.dnf:
+            name: ['ohpc-autotools', 'EasyBuild-ohpc', 'spack-ohpc', 'hwloc-ohpc', 'valgrind-ohpc']
+            state: present
+        - name: Install Compilers
+          ansible.builtin.dnf:
+            name: ['gnu14-compilers-ohpc']
+            state: present
+        - name: Install MPI stack
+          ansible.builtin.dnf:
+            name: ['openmpi5-pmix-gnu14-ohpc', 'mpich-ofi-gnu14-ohpc']
+            state: present  
+        - name: Install Perf tools
+          ansible.builtin.dnf:
+            name: ['ohpc-gnu14-perf-tools']
+            state: present
+        - name: Setup default dev-environment
+          ansible.builtin.dnf:
+            name: ['lmod-defaults-gnu14-openmpi5-ohpc']
+            state: present
+        - name: Install 3-rd party tools
+          ansible.builtin.dnf:
+            name: ['nano', 'ohpc-gnu14-serial-libs', 'ohpc-gnu14-io-libs', 'ohpc-gnu14-python-libs', 'ohpc-gnu14-runtimes', 'ohpc-gnu14-mpich-parallel-libs', 'ohpc-gnu14-openmpi5-parallel-libs']
+            state: present
+    - name: Resource manager startup
+      block:
+        - name: Start munge
+          ansible.builtin.systemd_service:
+            name: munge
+            state: started
+            enabled: true
+        - name: Start slurmctld
+          ansible.builtin.systemd_service:
+            name: slurmctld
+            state: started
+            enabled: true
+        - name: Enable munge on compute
+          ansible.builtin.command:
+            cmd: pdsh -w {{ compute_prefix }}[1-{{ compute_number }}] systemctl enable munge
+        - name: Enable slurmd on compute
+          ansible.builtin.command:
+            cmd: pdsh -w {{ compute_prefix }}[1-{{ compute_number }}] systemctl enable slurmd
+        - name: Start munge on compute
+          ansible.builtin.command:
+            cmd: pdsh -w {{ compute_prefix }}[1-{{ compute_number }}] systemctl start munge
+        - name: Start slurmd on compute
+          ansible.builtin.command:
+            cmd: pdsh -w {{ compute_prefix }}[1-{{ compute_number }}] systemctl start slurmd
+    - name: Add test user
+      ansible.builtin.user:
+        name: test
+        state: present
+    - name: Finish the playbook
+      ansible.builtin.debug:
+        msg: "Finished playbook. Validate the setup now."
