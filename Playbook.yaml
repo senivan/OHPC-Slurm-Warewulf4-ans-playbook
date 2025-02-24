@@ -19,9 +19,6 @@
           ansible.builtin.dnf:
             name: "*"
             state: latest
-        - name: Reboot system
-          ansible.builtin.reboot:
-            reboot_timeout: 600
     - name: Install OHPC Components
       block:
         - name: Enable OHPC repo
@@ -392,4 +389,8 @@
         state: present
     - name: Finish the playbook
       ansible.builtin.debug:
-        msg: "Finished playbook. Validate the setup now."
+        msg: "Finished playbook. Validate the setup now. Rebooting system now!"
+    - name: Reboot now
+      ansible.builtin.reboot:
+        pre_reboot_delay: 15
+        reboot_timeout: 600
