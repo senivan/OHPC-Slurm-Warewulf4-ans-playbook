@@ -1,1164 +1,338 @@
-# ---
-# - name: Install and configure Master Host
-#   hosts: master
-#   remote_user: root
-#   vars_files:
-#     - vars.yaml
-#   tasks:
-#     - name: Update Base System
-#       ansible.builtin.dnf:
-#         name: '*'
-#         state: latest
-#     - name: Disable SELinux
-#       ansible.builtin.shell: grubby --update-kernel ALL --args selinux=0
-#     - name: Disable Firewall
-#       ansible.builtin.systemd_service:
-#         name: firewalld.service
-#         state: stopped
-#     # - name: Restart to finish SELinux disabling
-#     #   ansible.builtin.reboot:
-#     #     reboot_timeout: 600
-#     - name: Enable CRB
-#       community.general.dnf_config_manager:
-#         name: crb
-#         state: enabled
-#     - name: Enable OHPC repository
-#       ansible.builtin.dnf:
-#         name: ["{{ repo_url }}", dnf-plugins-core]
-#         state: present
-#         disable_gpg_check: true
-#     - name: Install Baseline OHPC and provisioning
-#       ansible.builtin.dnf:
-#         name: [ohpc-base, warewulf-ohpc, hwloc-ohpc]
-#         state: latest
-#     - name: Enable Chrony Service
-#       ansible.builtin.systemd_service:
-#         name: chronyd.service
-#         state: started
-#     - name: Change Chrony config
-#       ansible.builtin.lineinfile:
-#         dest: /etc/chrony.conf
-#         line: "local stratum 10\nserver {{ ntp_server_address }}\nallow {{ internal_net }}/{{ internal_CIDR }}"
-#     - name: Restart Chrony Service
-#       ansible.builtin.systemd_service:
-#         name: chronyd.service
-#         state: restarted
-#     - name: Install Slurm Server
-#       ansible.builtin.dnf:
-#         name: ohpc-slurm-server
-#         state: latest
-#     - name: Copy Slurm config file
-#       ansible.builtin.copy:
-#         remote_src: true
-#         src: /etc/slurm/slurm.conf.ohpc
-#         dest: /etc/slurm/slurm.conf
-#         mode: preserve
-#     - name: Copy Slurm Groups config file
-#       ansible.builtin.copy:
-#         remote_src: true
-#         src: /etc/slurm/cgroup.conf.example
-#         dest: /etc/slurm/cgroup.conf
-#         mode: preserve
-#     - name: Update default Slurm config Master node
-#       ansible.builtin.lineinfile:
-#         dest: /etc/slurm/slurm.conf
-#         line: "SlurmctldHost={{ master_hostname }}"
-#         regexp: "^SlurmctldHost="
-#     - name: Comment out Nodename in Slurm config
-#       ansible.builtin.lineinfile:
-#         dest: /etc/slurm/slurm.conf
-#         line: "#"
-#         regexp: "^NodeName=.*$"
-#     - name: Update Compute slurm config
-#       ansible.builtin.shell: bash -c "perl -pi -e "s/^NodeName=.+$/#/" /etc/slurm/slurm.conf"
-#     # - name: Update for Slurm for Compute nodes
-#     #   ansible.builtin.lineinfile:
-#     #     dest: /etc/slurm/slurm.conf
-#     #     line: "Nodes={{ compute_prefix }}[1-{{ compute_number }}]"
-#     #     regexp: "(?<=\\s)Nodes=c\\S+(?=\\s)"
-#     - name: Add custom config in the end
-#       ansible.builtin.lineinfile:
-#         dest: /etc/slurm/slurm.conf
-#         line: "{{ slurm_node_conf }}"
-#     - name: Activate inter-cluster network
-#       ansible.builtin.command: bash -c 'ip link set dev {{ internal_eth }} up'
-#     - name: Set Master ip address
-#       ansible.builtin.shell: bash -c 'ip address add {{ master_ip }}/{{ internal_CIDR }} broadcast + dev {{ internal_eth }}'
-#       ignore_errors: true
-#     - name: Start Warewulf server
-#       ansible.builtin.systemd_service:
-#         name: warewulfd.service
-#         state: started
-#     - name: Warewulf change ipaddr
-#       ansible.builtin.command: 'perl -pi -e "s/ipaddr:.*/ipaddr: {{ master_ip }}/" /etc/warewulf/warewulf.conf'
-#     - name: Warewulf change netmask
-#       ansible.builtin.command: 'perl -pi -e "s/netmask:.*/netmask: {{ internal_netmask }}/" /etc/warewulf/warewulf.conf'
-#     - name: Warewulf change network 
-#       ansible.builtin.command: 'perl -pi -e "s/network:.*/network: {{ internal_net }}/" /etc/warewulf/warewulf.conf'
-#     - name: Warewulf change template
-#       ansible.builtin.command: 'perl -pi -e "s/template:.*/template: static/" /etc/warewulf/warewulf.conf'
-#     - name: Warewulf change DHCP range start
-#       ansible.builtin.command: 'perl -pi -e "s/range start:.*/range start: {{ compute_nodes[0].ip }}/" /etc/warewulf/warewulf.conf'
-#     - name: Warewulf change DHCP range end
-#       ansible.builtin.command: 'perl -pi -e "s/range end:.*/range end: {{ compute_nodes[compute_number - 1].ip }}/" /etc/warewulf/warewulf.conf'
-#     - name: Warewulf change mount
-#       ansible.builtin.command: 'perl -pi -e "s/mount: false/mount: true/" /etc/warewulf/warewulf.conf'
-#     - name: Update ww default netmask
-#       ansible.builtin.command: wwctl profile set -y default --netmask={{ internal_netmask }}
-#     - name: Update ww default ipv4 gateway
-#       ansible.builtin.command: wwctl profile set -y default --gateway={{ ipv4_gateway }}
-#     - name: Update ww default DNS Server
-#       ansible.builtin.command: wwctl profile set -y default --netdev=default --nettagadd=DNS={{ master_ip }}
-#     - name: Update compute overlays /etc/hosts
-#       ansible.builtin.command: 'perl -pi -e "s/warewulf/{{ master_hostname }}/" /srv/warewulf/overlays/host/rootfs/etc/hosts.ww'
-#     - name: Update other overlay /etc/hosts
-#       ansible.builtin.command: 'perl -pi -e "s/warewulf/{{ master_hostname }}/" /srv/warewulf/overlays/generic/rootfs/etc/hosts.ww'
-#     - name: Add iPXE server for compute nodes
-#       ansible.builtin.lineinfile:
-#         dest: /srv/warewulf/overlays/host/rootfs/etc/dhcpd.conf.ww
-#         line: "next-server {{ master_ip }};"
-#     - name: Enable Warewulf deamon
-#       ansible.builtin.systemd_service:
-#         name: warewulfd.service
-#         state: started
-#     - name: Run WW configurator
-#       ansible.builtin.command: wwctl configure --all
-#     - name: Generate SSH keys
-#       ansible.builtin.command: bash /etc/profile.d/ssh_setup.sh
-#     #######################
-#     # Compute image setup #
-#     #######################
-
-#     - name: Import container image
-#       ansible.builtin.command: wwctl container import {{ compute_base_image }} {{ local_image_name }} --syncuser --force
-#     # - name: Run basic container setup
-#     #   ansible.builtin.command: "wwctl container exec {{ local_image_name }} dnf -y install {{ repo_url }}"
-#     - name: Run basic container setup
-#       ansible.builtin.dnf:
-#         installroot: "{{ chroot_loc }}"
-#         name: "{{ repo_url }}"
-#         state: installed
-#         disable_gpg_check: true
-#     - name: Update container packages
-#       ansible.builtin.dnf:
-#         installroot: "{{ chroot_loc }}"
-#         name: '*'
-#         state: latest
-#     - name: Install ohpc base components
-#       ansible.builtin.dnf:
-#         installroot: "{{ chroot_loc }}"
-#         name: [ohpc-base-compute, ohpc-slurm-client, chrony, lmod-ohpc]
-#         state: latest
-#     - name: Validate slurm config 
-#       ansible.builtin.command: perl -pi -e "s/^NodeName=(\S+)/NodeName={{ compute_prefix }}[1-{{ compute_number }}]/" /etc/slurm/slurm.conf
-#     - name: Fix partition config
-#       ansible.builtin.command: 'perl -pi -e "s/^PartitionName=normal Nodes=(\S+)/PartitionName=normal Nodes={{ compute_prefix }}[1-{{ compute_number }}]/" /etc/slurm/slurm.conf'
-
-#     - name: Update host soft memlock
-#       ansible.builtin.command: perl -pi -e 's/# End of file/\* soft memlock unlimited\n$&/s' /etc/security/limits.conf
-#     - name: Update host hard memlock
-#       ansible.builtin.command: perl -pi -e 's/# End of file/\* hard memlock unlimited\n$&/s' /etc/security/limits.conf
-#     - name: Update compute soft memlock
-#       ansible.builtin.command: perl -pi -e 's/# End of file/\* soft memlock unlimited\n$&/s' {{ chroot_loc }}/etc/security/limits.conf
-#     - name: Update compute hard memlock
-#       ansible.builtin.command: perl -pi -e 's/# End of file/\* hard memlock unlimited\n$&/s' {{ chroot_loc }}/etc/security/limits.conf
-
-#     - name: Enable Slurm PAM module
-#       ansible.builtin.lineinfile:
-#         dest: "{{ chroot_loc }}/etc/pam.d/sshd"
-#         line: "account    required     pam_slurm.so"
-#       when: ssh_lock
-
-#     - name: Create rsyslog config file
-#       ansible.builtin.file:
-#         dest: /etc/rsyslog.d/ohpc.conf
-#         state: touch
-#     - name: Start configuring rsyslog
-#       ansible.builtin.lineinfile:
-#         dest: /etc/rsyslog.d/ohpc.conf
-#         line: module(load="imudp")
-#     - name: Continue configuring rsyslog
-#       ansible.builtin.lineinfile:
-#         dest: /etc/rsyslog.d/ohpc.conf
-#         line: input(type="imudp" port="514") >> /etc/rsyslog.d/ohpc.conf
-#     - name: Restart rsyslog
-#       ansible.builtin.systemd_service:
-#         name: rsyslog
-#         state: restarted
-
-#     - name: Setup rsyslog on compute nodes
-#       ansible.builtin.lineinfile:
-#         dest: "{{ chroot_loc }}/etc/rsyslog.conf"
-#         line: '*.* action(type=\"omfwd\" Target=\"{{ master_ip }}\" Port=\"514\" " "Protocol=\"udp\")'
-#     - name: remove on-system logging 1
-#       ansible.builtin.command: perl -pi -e "s/^\*\.info/\\#\*\.info/" {{ chroot_loc }}/etc/rsyslog.conf
-#     - name: remove on-system logging 2
-#       ansible.builtin.command: perl -pi -e "s/^authpriv/\\#authpriv/" {{ chroot_loc }}/etc/rsyslog.conf
-#     - name: remove on-system logging 3
-#       ansible.builtin.command: perl -pi -e "s/^mail/\\#mail/" {{ chroot_loc }}/etc/rsyslog.conf
-#     - name: remove on-system logging 4
-#       ansible.builtin.command: perl -pi -e "s/^cron/\\#cron/" {{ chroot_loc }}/etc/rsyslog.conf
-#     - name: remove on-system logging 5
-#       ansible.builtin.command: perl -pi -e "s/^uucp/\\#uucp/" {{ chroot_loc }}/etc/rsyslog.conf
-
-#     - name: Install health check
-#       ansible.builtin.dnf:
-#         name: nhc-ohpc
-
-#         state: latest
-
-#     - name: Install health check on compute
-#       ansible.builtin.dnf:
-#         installroot: "{{ chroot_loc }}"
-#         name: nhc-ohpc
-#         state: latest
-
-#     - name: Register health check
-#       ansible.builtin.lineinfile:
-#         dest: /etc/slurm/slurm.conf
-#         line: "HealthCheckProgram=/usr/sbin/nhc\nHealthCheckInterval=300"
-
-#     - name: Import subuid file inside of the container
-#       ansible.builtin.command: wwctl overlay import generic /etc/subuid
-#       ignore_errors: true
-#     - name: Import subgid file inside of the container
-#       ansible.builtin.command: wwctl overlay import generic /etc/subgid
-#       ignore_errors: true
-#     - name: Setup NTP on compute
-#       ansible.builtin.command: echo "server {{ master_ip }} iburst" | wwctl overlay import generic <(cat) /etc/chrony.conf
-#       ignore_errors: true
-#     - name: Create sysconfig folder
-#       ansible.builtin.command: wwctl overlay mkdir generic /etc/sysconfig/
-#     - name: Import slurm config
-#       ansible.builtin.command: bash -c 'wwctl overlay import generic <(echo SLURMD_OPTIONS="--conf-server {{ master_ip }}") /etc/sysconfig/slurmd'
-#       ignore_errors: true
-#     - name: Create munge folder
-#       ansible.builtin.command: bash -c 'wwctl overlay mkdir generic --mode 0700 /etc/munge'
-#       ignore_errors: true
-#     - name: Import munge keys    
-#       ansible.builtin.command: wwctl overlay import generic /etc/munge/munge.key
-#       ignore_errors: true
-#     - name: Chown munge key
-#       ansible.builtin.command: bash -c 'wwctl overlay chown generic /etc/munge/munge.key $(id -u munge) $(id -g munge)'
-#     - name: Chown munge folder
-#       ansible.builtin.command: bash -c 'wwctl overlay chown generic /etc/munge $(id -u munge) $(id -g munge)'
-
-#     - name: Bootstrap the image
-#       ansible.builtin.command: wwctl container build {{ local_image_name }}
-
-#     - name: Rebuild the overlay
-#       ansible.builtin.command: wwctl overlay build
-
-#     - name: Register compute nodes into inter-cluster
-#       ansible.builtin.command: "wwctl node add --container={{ local_image_name }}\
-#         --ipaddr={{ item.ip }} --hwaddr={{ item.mac }} {{item.cname}}"
-#       loop: "{{ compute_nodes }}"
-#       ignore_errors: true
-#     - name: Build overlay
-#       ansible.builtin.command: wwctl overlay build
-
-#     - name: Configure everything
-#       ansible.builtin.command: wwctl configure --all
-#     - name: Enable Munge
-#       ansible.builtin.systemd_service:
-#         name: munge
-#         state: started
-#     - name: Enable Slurm
-#       ansible.builtin.systemd_service:
-#         name: slurmctld
-#         state: started
-
-#   ########################
-#   # Installing dev tools #
-#   ########################
-
-#     - name: Install basics
-#       ansible.builtin.dnf:
-#         name:
-#           - ohpc-autotools
-#           - hwloc-ohpc
-#           - spack-ohpc
-#           - valgrind-ohpc
-#           - EasyBuild-ohpc
-#         state: latest
-
-
-#     - name: Install compilers
-#       ansible.builtin.dnf:
-#         name: gnu14-compilers-ohpc
-#         state: latest
-
-#     - name: Install MPI stack
-#       ansible.builtin.dnf:
-#         name: [openmpi5-pmix-gnu14-ohpc, mpich-ofi-gnu14-ohpc]
-#         state: latest
-
-#     - name: Install Perf tools
-#       ansible.builtin.dnf:
-#         name: [ohpc-gnu14-perf-tools, lmod-defaults-gnu14-openmpi5-ohpc]
-#         state: latest
-
-#     - name: Sleep for computes to Bootstrap
-#       ansible.builtin.command: sleep {{ provision_time }}
-
-#     - name: Start Slurm server
-#       ansible.builtin.systemd_service:
-#         name: [munge, slurmctld]
-#         state: started
-
-#     - name: Start slurm on compute nodes
-#       ansible.builtin.command: pdsh -w {{ compute_prefix }}[1-{{ compute_number }}] systemctl start munge
-#         pdsh -w {{ compute_prefix }}[1-{{ compute_number }}] systemctl start slurmd
-
-#     - name: Add a test user
-#       ansible.builtin.user:
-#         name: "test"
-#         state: present
-
-#     - name: Make test user availible on all nodes
-#       ansible.builtin.command: wwctl overlay build
-
-#     - name: Sleep before ending
-#       ansible.builtin.command: sleep 90
-
 ---
-- name: Configure OpenHPC Master (SMS) Node
+- name: Install and configure Master Host
   hosts: master
-  become: true
+  remote_user: root
   vars_files:
     - vars.yaml
   tasks:
-    # Check that our input file exists
-    # - name: Check for input file
-    #   ansible.builtin.stat:
-    #     path: "{{ ohpc_input_local | default('/opt/ohpc/pub/doc/recipes/rocky9/input.local') }}"
-    #   register: input_file
-
-    # - name: Fail if input file not found
-    #   ansible.builtin.fail:
-    #     msg: "Error: Unable to access local input file -> {{ ohpc_input_local | default('/opt/ohpc/pub/doc/recipes/rocky9/input.local') }}"
-    #   when: not input_file.stat.exists
-
-    # Verify that the OpenHPC repository is enabled
-    - name: Install dnf repo
-      ansible.builtin.dnf:
-        name: "{{ ohpc_release_rpm_url }}"
-        state: installed
-        disable_gpg_check: true
-    - name: Get DNF repolist
-      ansible.builtin.command: dnf repolist
-      register: repolist
-      changed_when: false
-
-    - name: Fail if OpenHPC repository not enabled
-      ansible.builtin.fail:
-        msg: "Error: OpenHPC repository must be enabled locally"
-      when: repolist.stdout.find("OpenHPC") == -1
-
-    # Disable firewall
-    - name: Disable and stop firewalld
-      ansible.builtin.systemd:
-        name: firewalld
-        state: stopped
-        enabled: no
-
-    # Install baseline OpenHPC packages
-    - name: Install ohpc-base, warewulf-ohpc, and hwloc-ohpc packages
-      ansible.builtin.dnf:
-        name:
-          - ohpc-base
-          - warewulf-ohpc
-          - hwloc-ohpc
-        state: present
-        update_cache: yes
-
-    # Enable and configure Chrony
-    - name: Enable and start chronyd service
-      ansible.builtin.systemd:
-        name: chronyd
-        enabled: yes
-        state: started
-
-    - name: Configure Chrony settings
-      ansible.builtin.blockinfile:
-        path: /etc/chrony.conf
-        marker: "# {mark} ANSIBLE CHRONY CONFIG"
-        block: |
-          local stratum 10
-          server {{ ntp_server }}
-          allow all
-      notify: Restart chronyd
-
-    # Install SLURM server and configure slurm.conf
-    - name: Install ohpc-slurm-server package
-      ansible.builtin.dnf:
-        name: ohpc-slurm-server
-        state: present
-
-    - name: Copy slurm.conf template to slurm.conf
-      ansible.builtin.copy:
-        src: /etc/slurm/slurm.conf.ohpc
-        dest: /etc/slurm/slurm.conf
-        remote_src: yes
-
-    - name: Copy cgroup config to /etc/slurm
-      ansible.builtin.copy:
-        src: /etc/slurm/cgroup.conf.example
-        dest: /etc/slurm/cgroup.conf
-        remote_src: yes
-
-    - name: Set Slurm controller host in slurm.conf
-      ansible.builtin.lineinfile:
-        path: /etc/slurm/slurm.conf
-        regexp: '^SlurmctldHost='
-        line: "SlurmctldHost={{ sms_name }}"
-
-    - name: Update node configuration in slurm.conf (if enabled)
+    - name: Host pre-setup
       block:
-        - name: Comment out existing NodeName lines
-          ansible.builtin.replace:
-            path: /etc/slurm/slurm.conf
-            regexp: '^NodeName=.*'
-            replace: "#"
-        - name: Update partition Nodes configuration
-          ansible.builtin.replace:
-            path: /etc/slurm/slurm.conf
-            regexp: ' Nodes=c\S+ '
-            replace: " Nodes={{ compute_prefix }}[1-{{ num_computes }}] "
-        - name: Append custom slurm node configuration
-          ansible.builtin.lineinfile:
-            path: /etc/slurm/slurm.conf
-            line: "{{ slurm_node_config }}"
-            insertafter: EOF
-      when: update_slurm_nodeconfig | bool
-
-    # Optionally install InfiniBand support
-    - name: Install InfiniBand support group packages
-      ansible.builtin.dnf:
-        name: "@InfiniBand Support"
-        state: present
-      when: enable_ib | bool
-
-    - name: Trigger udev for InfiniBand devices
-      ansible.builtin.command: udevadm trigger --type=devices --action=add
-      when: enable_ib | bool
-
-    - name: Restart rdma-load-modules service
-      ansible.builtin.systemd:
-        name: rdma-load-modules@infiniband.service
-        state: restarted
-      when: enable_ib | bool
-
-    # Optionally install and enable OpenSM
-    - name: Install and enable OpenSM (subnet manager)
-      block:
-        - name: Install opensm package
+        - name: Disable firewalld
+          ansible.builtin.systemd_service:
+            name: firewalld
+            state: stopped
+            enabled: false
+        - name: Disable SELinux
+          ansible.posix.selinux:
+            state: disabled
+        - name: Update base system
           ansible.builtin.dnf:
-            name: opensm
+            name: "*"
+            state: latest
+        - name: Reboot system
+          ansible.builtin.reboot:
+            reboot_timeout: 600
+    - name: Install OHPC Components
+      block:
+        - name: Enable OHPC repo
+          ansible.builtin.dnf:
+            name: "{{ repo_url }}"
             state: present
-        - name: Enable and start opensm service
-          ansible.builtin.systemd:
-            name: opensm
-            enabled: yes
+        - name: Install dnf-plugins-core
+          ansible.builtin.dnf:
+            name: "dnf-plugins-core"
+            state: present
+        - name: Enable crb repo
+          ansible.builtin.command:
+            cmd: dnf config-manager --set-enabled crb
+        - name: Add provisioning services
+          ansible.builtin.dnf:
+            name: ['ohpc-base', 'warewulf-ohpc', 'hwloc-ohpc']
+            state: present
+    - name: Setup chrony ntp server
+      block:
+        - name: Enable chrony
+          ansible.builtin.systemd_service:
+            name: chronyd
             state: started
-      when: enable_opensm | bool
-
-    # Optionally configure IPoIB interface
-    - name: Configure IPoIB interface
-      block:
-        - name: Copy ifcfg-ib0 file to network-scripts
-          ansible.builtin.copy:
-            src: /opt/ohpc/pub/examples/network/centos/ifcfg-ib0
-            dest: /etc/sysconfig/network-scripts/ifcfg-ib0
-            remote_src: yes
-        - name: Replace master_ipoib with SMS IPoIB variable
-          ansible.builtin.replace:
-            path: /etc/sysconfig/network-scripts/ifcfg-ib0
-            regexp: 'master_ipoib'
-            replace: "{{ sms_ipoib }}"
-        - name: Replace ipoib_netmask placeholder with actual netmask
-          ansible.builtin.replace:
-            path: /etc/sysconfig/network-scripts/ifcfg-ib0
-            regexp: 'ipoib_netmask'
-            replace: "{{ ipoib_netmask }}"
-        - name: Create NetworkManager DNS override config
-          ansible.builtin.copy:
-            dest: /etc/NetworkManager/conf.d/90-dns-none.conf
-            content: |
-              [main]
-              dns=none
-        - name: Start NetworkManager service
-          ansible.builtin.systemd:
-            name: NetworkManager
-            state: started
-      when: enable_ipoib | bool
-
-    # Optionally install Omni-Path support packages
-    - name: Install Omni-Path basic tools
-      ansible.builtin.dnf:
-        name: opa-basic-tools
-        state: present
-      when: enable_opa | bool
-
-    - name: Install and enable OPA fabric manager
-      block:
-        - name: Install opa-fm package
-          ansible.builtin.dnf:
-            name: opa-fm
-            state: present
-        - name: Enable and start opafm service
-          ansible.builtin.systemd:
-            name: opafm
-            enabled: yes
-            state: started
-      when: enable_opafm | bool
-
-    # Basic Warewulf configuration on the master node
-    - name: Bring up internal network interface
-      ansible.builtin.command: ip link set dev {{ sms_eth_internal }} up
-
-    - name: Add IP address to internal network interface
-      ansible.builtin.command: ip address add {{ sms_ip }}/{{ internal_netmask }} broadcast + dev {{ sms_eth_internal }}
-      ignore_errors: true
-
-    - name: Update warewulf.conf with ipaddr
-      ansible.builtin.replace:
-        path: /etc/warewulf/warewulf.conf
-        regexp: '^ipaddr:.*'
-        replace: "ipaddr: {{ sms_ip }}"
-
-    - name: Update warewulf.conf with netmask
-      ansible.builtin.replace:
-        path: /etc/warewulf/warewulf.conf
-        regexp: '^netmask:.*'
-        replace: "netmask: {{ internal_netmask }}"
-
-    - name: Update warewulf.conf with network
-      ansible.builtin.replace:
-        path: /etc/warewulf/warewulf.conf
-        regexp: '^network:.*'
-        replace: "network: {{ internal_network }}"
-
-    - name: Set warewulf template to static
-      ansible.builtin.replace:
-        path: /etc/warewulf/warewulf.conf
-        regexp: '^template:.*'
-        replace: "template: static"
-
-    - name: Update warewulf.conf with range start
-      ansible.builtin.replace:
-        path: /etc/warewulf/warewulf.conf
-        regexp: 'range start:.*'
-        replace: "range start: {{ c_ip_first }}"
-
-    - name: Update warewulf.conf with range end
-      ansible.builtin.replace:
-        path: /etc/warewulf/warewulf.conf
-        regexp: 'range end:.*'
-        replace: "range end: {{ c_ip_last }}"
-
-    - name: Change mount option in warewulf.conf
-      ansible.builtin.replace:
-        path: /etc/warewulf/warewulf.conf
-        regexp: '^mount: false'
-        replace: "mount: true"
-    - name: Start warewulf server
-      ansible.builtin.systemd_service:
-        name: warewulfd
-        state: started
-
-    - name: Set ww profile netmask
-      ansible.builtin.command: wwctl profile set -y default --netmask={{ internal_netmask }}
-
-    - name: Set ww profile gateway
-      ansible.builtin.command: wwctl profile set -y default --gateway={{ ipv4_gateway }}
-
-    - name: Set ww profile DNS server
-      ansible.builtin.command: wwctl profile set -y default --netdev=default --nettagadd=DNS={{ dns_servers }}
-
-    - name: Update hosts overlay (host)
-      ansible.builtin.replace:
-        path: /srv/warewulf/overlays/host/rootfs/etc/hosts.ww
-        regexp: 'warewulf'
-        replace: "{{ sms_name }}"
-
-    - name: Update hosts overlay (generic)
-      ansible.builtin.replace:
-        path: /srv/warewulf/overlays/generic/rootfs/etc/hosts.ww
-        regexp: 'warewulf'
-        replace: "{{ sms_name }}"
-
-    - name: Append next-server directive to DHCP overlay
-      ansible.builtin.lineinfile:
-        path: /srv/warewulf/overlays/host/rootfs/etc/dhcpd.conf.ww
-        line: "next-server {{ sms_ip }};"
-        create: yes
-
-    - name: Enable and start warewulfd service
-      ansible.builtin.systemd:
-        name: warewulfd
-        enabled: yes
-        state: started
-
-    - name: Run wwctl configure
-      ansible.builtin.command: wwctl configure --all
-
-    - name: Run SSH key generation script
-      ansible.builtin.command: bash /etc/profile.d/ssh_setup.sh
-
-    - name: Update /etc/hosts overlay with localdomain (if needed)
-      ansible.builtin.replace:
-        path: /srv/warewulf/overlays/host/rootfs/etc/hosts.ww
-        regexp: '(\{\{\$node\.Id\.Get\}\}\{\{end\}\})'
-        replace: "{{ '\\1.localdomain \\1' }}"
-        # Adjust regex/replacement as appropriate
-
-    # Create compute image for Warewulf
-    - name: Import compute container image
-      ansible.builtin.command: >
-        wwctl container import docker://{{ container_image_url }} rocky-9.4 --syncuser
-
-    - name: Execute compute image initial setup (install ohpc-release and update)
-      ansible.builtin.shell: >
-        wwctl container exec rocky-9.4 /bin/bash -c "dnf -y install {{ ohpc_release_rpm_url }} && dnf -y update"
-
-    - name: Set compute chroot directory fact
-      ansible.builtin.set_fact:
-        chroot_dir: "/srv/warewulf/chroots/rocky-9.4/rootfs"
-
-    - name: Install OpenHPC base components in compute image
-      ansible.builtin.shell: >
-        wwctl container exec rocky-9.4 /bin/bash -c "dnf -y install ohpc-base-compute"
-
-    - name: Install SLURM client and additional components in compute image
-      ansible.builtin.shell: >
-        wwctl container exec rocky-9.4 /bin/bash -c "dnf -y install ohpc-slurm-client && systemctl enable munge && systemctl enable slurmd && dnf -y install chrony && dnf -y install lmod-ohpc"
-
-    # Optionally configure Intel packages in compute image
-    - name: Configure Intel packages for compute image
-      block:
-        - name: Create /opt/intel on master
-          ansible.builtin.file:
-            path: /opt/intel
-            state: directory
-        - name: Append NFS export for /opt/intel on master
-          ansible.builtin.lineinfile:
-            path: /etc/exports
-            line: "/opt/intel *(ro,no_subtree_check,fsid=12)"
-            create: yes
-        - name: Append NFS mount entry in compute fstab
-          ansible.builtin.lineinfile:
-            path: "{{ chroot_dir }}/etc/fstab"
-            line: "{{ sms_ip }}:/opt/intel /opt/intel nfs nfsvers=4,nodev 0 0"
-      when: enable_intel_packages | bool
-
-    # Update slurm.conf for additional compute nodes if num_computes > 4
-    - name: Update slurm.conf for compute nodes (if num_computes > 4)
-      block:
-        - name: Update NodeName line in slurm.conf
-          ansible.builtin.replace:
-            path: /etc/slurm/slurm.conf
-            regexp: '^NodeName=\S+'
-            replace: "NodeName={{ compute_prefix }}[1-{{ num_computes }}]"
-        - name: Update PartitionName line in slurm.conf
-          ansible.builtin.replace:
-            path: /etc/slurm/slurm.conf
-            regexp: '^PartitionName=normal Nodes=\S+'
-            replace: "PartitionName=normal Nodes={{ compute_prefix }}[1-{{ num_computes }}]"
-      when: num_computes | int > 4
-
-    # Optionally add IB/OPA drivers to compute image
-    - name: Add InfiniBand drivers to compute image
-      ansible.builtin.dnf:
-        installroot: "{{ chroot_dir }}"
-        name: "@InfiniBand Support"
-        state: present
-      when: enable_ib | bool
-
-    - name: Add Omni-Path drivers to compute image
-      block:
-        - name: Install opa-basic-tools in compute image
-          ansible.builtin.dnf:
-            installroot: "{{ chroot_dir }}"
-            name: opa-basic-tools
-            state: present
-        - name: Install libpsm2 in compute image
-          ansible.builtin.dnf:
-            installroot: "{{ chroot_dir }}"
-            name: libpsm2
-            state: present
-      when: enable_opa | bool
-
-    # Update memlock limits on master and in compute image
-    - name: Set memlock limits on master
-      ansible.builtin.blockinfile:
-        path: /etc/security/limits.conf
-        marker: "# {mark} ANSIBLE MEMLOCK SETTINGS"
-        block: |
-          * soft memlock unlimited
-          * hard memlock unlimited
-
-    - name: Set memlock limits in compute image
-      ansible.builtin.blockinfile:
-        path: "{{ chroot_dir }}/etc/security/limits.conf"
-        marker: "# {mark} ANSIBLE MEMLOCK SETTINGS"
-        block: |
-          * soft memlock unlimited
-          * hard memlock unlimited
-
-    # Enable slurm PAM module in compute image
-    - name: Enable slurm PAM module in compute image
-      ansible.builtin.lineinfile:
-        path: "{{ chroot_dir }}/etc/pam.d/sshd"
-        line: "account    required     pam_slurm.so"
-        insertafter: EOF
-
-    # Optionally install BeeGFS client and configure
-    - name: Configure BeeGFS client on master and compute image
-      block:
-        - name: Download BeeGFS repo file on master
-          ansible.builtin.get_url:
-            url: "{{ beegfs_repo_url }}"
-            dest: /etc/yum.repos.d/beegfs-rhel9.repo
-        - name: Install BeeGFS prerequisites on master
-          ansible.builtin.dnf:
-            name:
-              - kernel-devel
-              - gcc
-              - elfutils-libelf-devel
-            state: present
-        - name: Install BeeGFS client packages on master
-          ansible.builtin.dnf:
-            name:
-              - beegfs-client
-              - beegfs-helperd
-              - beegfs-utils
-            state: present
-        - name: Update BeeGFS autobuild config on master
-          ansible.builtin.replace:
-            path: /etc/beegfs/beegfs-client-autobuild.conf
-            regexp: '^buildArgs=-j8'
-            replace: "buildArgs=-j8 BEEGFS_OPENTK_IBVERBS=1"
-        - name: Setup BeeGFS client on master
-          ansible.builtin.command: /opt/beegfs/sbin/beegfs-setup-client -m {{ sysmgmtd_host }}
-        - name: Start BeeGFS services on master
-          ansible.builtin.systemd:
-            name: "{{ item }}"
-            state: started
-          loop:
-            - beegfs-helperd
-            - beegfs-client
-        - name: Download BeeGFS repo file in compute image
-          ansible.builtin.get_url:
-            url: "{{ beegfs_repo_url }}"
-            dest: "{{ chroot_dir }}/etc/yum.repos.d/beegfs-rhel9.repo"
-        - name: Install BeeGFS packages in compute image
-          ansible.builtin.dnf:
-            installroot: "{{ chroot_dir }}"
-            name:
-              - beegfs-client
-              - beegfs-helperd
-              - beegfs-utils
-            state: present
-        - name: Update BeeGFS autobuild config in compute image
-          ansible.builtin.replace:
-            path: "{{ chroot_dir }}/etc/beegfs/beegfs-client-autobuild.conf"
-            regexp: '^buildEnabled=true'
-            replace: "buildEnabled=false"
-        - name: Remove BeeGFS force-auto-build file in compute image
-          ansible.builtin.file:
-            path: "{{ chroot_dir }}/var/lib/beegfs/client/force-auto-build"
-            state: absent
-        - name: Enable BeeGFS services in compute image
-          ansible.builtin.command: chroot {{ chroot_dir }} systemctl enable beegfs-helperd beegfs-client
-        - name: Copy BeeGFS client configuration into compute image
-          ansible.builtin.copy:
-            src: /etc/beegfs/beegfs-client.conf
-            dest: "{{ chroot_dir }}/etc/beegfs/beegfs-client.conf"
-        - name: Append BeeGFS driver line to warewulf bootstrap configuration
-          ansible.builtin.lineinfile:
-            path: /etc/warewulf/bootstrap.conf
-            line: "drivers += beegfs"
-            insertafter: EOF
-      when: enable_beegfs_client | bool
-
-    # Optionally install Lustre client on master and configure compute image
-    - name: Configure Lustre client (if enabled)
-      block:
-        - name: Install Lustre client on master
-          ansible.builtin.dnf:
-            name: lustre-client-ohpc
-            state: present
-        - name: Install Lustre client in compute image
-          ansible.builtin.dnf:
-            installroot: "{{ chroot_dir }}"
-            name: lustre-client-ohpc
-            state: present
-        - name: Create Lustre mount directory in compute image
-          ansible.builtin.file:
-            path: "{{ chroot_dir }}/mnt/lustre"
-            state: directory
-        - name: Add Lustre mount entry in compute fstab
-          ansible.builtin.lineinfile:
-            path: "{{ chroot_dir }}/etc/fstab"
-            line: "{{ mgs_fs_name }} /mnt/lustre lustre defaults,localflock,noauto,x-systemd.automount 0 0"
-        - name: Append Lustre options in modprobe config on master
-          ansible.builtin.lineinfile:
-            path: /etc/modprobe.d/lustre.conf
-            line: "options lnet networks=o2ib(ib0)"
-            create: yes
-        - name: Append Lustre options in modprobe config in compute image
-          ansible.builtin.lineinfile:
-            path: "{{ chroot_dir }}/etc/modprobe.d/lustre.conf"
-            line: "options lnet networks=o2ib(ib0)"
-            create: yes
-        - name: Create Lustre mount directory on master
-          ansible.builtin.file:
-            path: /mnt/lustre
-            state: directory
-        - name: Mount Lustre filesystem on master
-          ansible.builtin.mount:
-            path: /mnt/lustre
-            src: "{{ mgs_fs_name }}"
-            fstype: lustre
-            opts: localflock
-            state: mounted
-      when: enable_lustre_client | bool
-
-    # Configure rsyslog on master and update compute image configuration
-    - name: Configure rsyslog on master
-      block:
-        - name: Add OHPC rsyslog configuration block
+            enabled: true
+        - name: Change config with blockinfile
           ansible.builtin.blockinfile:
-            path: /etc/rsyslog.d/ohpc.conf
-            marker: "# {mark} ANSIBLE RSYSLOG CONFIG"
+            name: /etc/chrony.conf
+            block: |
+              local stratum 10
+              server {{ ntp_server }}
+              allow {{ internal_net }}/{{ internal_CIDR }}
+            state: present
+        - name: Restart chrony
+          ansible.builtin.systemd_service:
+            name: chronyd
+            state: restarted
+    - name: Add resource management on master
+      block:
+        - name: Install slurm server
+          ansible.builtin.dnf:
+            name: 'ohpc-slurm-server'
+            state: present
+        - name: Copy example slurm.conf
+          ansible.builtin.copy:
+            src: /etc/slurm/slurm.conf.ohpc
+            dest: /etc/slurm/slurm.conf
+            remote_src: true
+        - name: Copy example cgroups
+          ansible.builtin.copy:
+            src: /etc/slurm/cgroup.conf.example
+            dest: /etc/slurm/cgroup.conf
+            remote_src: true
+        - name: Change server host
+          ansible.builtin.replace:
+            regexp: "^SlurmctldHost=.*$"
+            replace: "SlurmctldHost={{ master_hostname }}"
+            name: /etc/slurm/slurm.conf
+        - name: Comment out node host
+          ansible.builtin.replace:
+            regexp: "^NodeName=.*$"
+            replace: "#NodeName={{ compute_prefix }}[1-{{ compute_number }}]"
+            name: /etc/slurm/slurm.conf
+        - name: Add node host
+          ansible.builtin.lineinfile:
+            line: "{{ slurm_node_conf }}"
+            state: present
+            insertafter: EOF
+            name: /etc/slurm/slurm.conf
+        - name: Fix partition config
+          ansible.builtin.replace:
+            name: /etc/slurm/slurm.conf
+            regexp: "^PartitionName=normal Nodes=.*$"
+            replace: "PartitionName=normal Nodes={{ compute_prefix }}[1-{{ compute_number }}] Default=YES MaxTime=24:00:00 State=UP Oversubscribe=EXCLUSIVE"
+    - name: Complete Basic Warewulf setup for master
+      block:
+        - name: Set internal interface UP
+          ansible.builtin.command:
+            cmd: ip link set {{ internal_eth }} up
+        - name: Set internal interface IP
+          ansible.builtin.command:
+            cmd: ip addr add {{ master_ip }}/{{ internal_CIDR }} broadcast + dev {{ internal_eth }}
+        - name: Replace ipaddr in Warewulf config
+          ansible.builtin.replace:
+            regexp: "^ipaddr:.*$"
+            replace: "ipaddr: {{ master_ip }}"
+            name: /etc/warewulf/warewulf.conf
+        - name: Replace netmask in Warewulf config
+          ansible.builtin.replace:
+            regexp: "^netmask:.*$"
+            replace: "netmask: {{ internal_netmask }}"
+            name: /etc/warewulf/warewulf.conf
+        - name: Replace network in Warewulf config
+          ansible.builtin.replace:
+            regexp: "^network:.*$"
+            replace: "network: {{ internal_net }}"
+            name: /etc/warewulf/warewulf.conf
+        - name: Replace template to static
+          ansible.builtin.replace:
+            regexp: "^template:.*$"
+            replace: "template: static"
+            name: /etc/warewulf/warewulf.conf
+        - name: Replace dhcp range start
+          ansible.builtin.replace:
+            regexp: "^range start:.*$"
+            replace: "range start: {{ compute_nodes[0].ip }}"
+            name: /etc/warewulf/warewulf.conf
+        - name: Replace dhcp range end
+          ansible.builtin.replace:
+            regexp: "^range end:.*$"
+            replace: "range end: {{ compute_nodes[-1].ip }}"
+            name: /etc/warewulf/warewulf.conf
+        - name: Change mount false to true
+          ansible.builtin.replace:
+            regexp: "^mount: false$"
+            replace: "mount: true"
+            name: /etc/warewulf/warewulf.conf
+        - name: Start Warewulf daemon
+          ansible.builtin.systemd_service:
+            name: warewulfd
+            state: started
+            enabled: true
+        - name: Set netmask with wwctl
+          ansible.builtin.command:
+            cmd: wwctl profile set -y default --netmask {{ internal_netmask }}
+        - name: Set ipv4 gateway with wwctl
+          ansible.builtin.command:
+            cmd: wwctl profile set -y default --gateway {{ ipv4_gateway }}
+        - name: Set dns server with wwctl
+          ansible.builtin.command:
+            cmd: wwctl profile set -y default --netdev=default --nettagadd=DNS={{ master_ip }}
+        - name: Change host /etc/hosts
+          ansible.builtin.replace:
+            regexp: "^warewulf$"
+            replace: "{{ master_hostname }}"
+            name: /srv/warewulf/overlays/host/rootfs/etc/hosts.ww
+        - name: Change generic /etc/hosts
+          ansible.builtin.replace:
+            regexp: "^warewulf$"
+            replace: "{{ master_hostname }}"
+            name: /srv/warewulf/overlays/generic/rootfs/etc/hosts.ww
+        - name: Add iPXE server into dhcpd config
+          ansible.builtin.lineinfile:
+            line: "next-server {{ master_ip }};"
+            state: present
+            insertafter: "EOF"
+            name: /srv/warewulf/overlays/host/rootfs/etc/dhcpd.conf.ww
+        - name: Enable warewulfd
+          ansible.builtin.systemd_service:
+            name: warewulfd
+            state: started
+            enabled: true
+        - name: Run configure all
+          ansible.builtin.command:
+            cmd: wwctl configure --all
+        - name: Setup ssh keys
+          ansible.builtin.command:
+            cmd: bash /etc/profile.d/ssh_setup.sh
+    - name: Define compute image for provisioning
+      block:
+        - name: Pull base image
+          ansible.builtin.command:
+            cmd: wwctl container import {{ compute_base_image }} {{ local_image_name }} --syncuser
+        - name: Enable OpenHPC inside image
+          ansible.builtin.command:
+            cmd: wwctl container exec {{ local_image_name }} dnf -y install {{ repo_url }}
+        - name: Update base image
+          ansible.builtin.command:
+            cmd: wwctl container exec {{ local_image_name }} dnf -y update
+        - name: Export CHROOT
+          ansible.builtin.set_fact:
+            chroot_loc: "/srv/warewulf/chroots/{{ local_image_name }}/rootfs"
+        - name: Install ohpc base Components
+          ansible.builtin.dnf:
+            name: ['ohpc-base-compute', 'ohpc-slurm-client', 'chrony', 'lmod-ohpc']
+            state: present
+            installroot: "{{ chroot_loc }}" 
+    - name: Increase memory limits
+      block: 
+        - name: Increase master memory limits
+          ansible.builtin.replace:
+            regexp: "^# End of file$"
+            replace: "* soft memlock unlimited\n* hard memlock unlimited\n# End of file"
+            name: /etc/security/limits.conf
+        - name: Increase compute memory limits
+          ansible.builtin.replace:
+            regexp: "^# End of file$"
+            replace: "* soft memlock unlimited\n* hard memlock unlimited\n# End of file"
+            name: "{{ chroot_loc }}/etc/security/limits.conf"
+    - name: Lock ssh
+      ansible.builtin.lineinfile:
+        line: "account required pam_slurm.so"
+        state: present
+        insertafter: "EOF"
+        name: "{{ chroot_loc }}/etc/pam.d/sshd"
+      when: ssh_lock
+    - name: Enable system logs forwarding
+      block:
+        - name: Append config file
+          ansible.builtin.blockinfile:
             block: |
               module(load="imudp")
               input(type="imudp" port="514")
-        - name: Restart rsyslog service
-          ansible.builtin.systemd:
+            name: /etc/rsyslog.d/ohpc.conf
+            state: present
+        - name: Restart rsyslog
+          ansible.builtin.systemd_service:
             name: rsyslog
             state: restarted
-      notify: Restart rsyslog
-
-    - name: Append rsyslog forwarder line to compute image rsyslog.conf
-      ansible.builtin.lineinfile:
-        path: "{{ chroot_dir }}/etc/rsyslog.conf"
-        line: "*.* action(type=\"omfwd\" Target=\"{{ sms_ip }}\" Port=\"514\" Protocol=\"udp\")"
-        insertafter: EOF
-
-    - name: Comment out local logging lines in compute image rsyslog.conf
-      ansible.builtin.replace:
-        path: "{{ chroot_dir }}/etc/rsyslog.conf"
-        regexp: '^(\\*\\.info|authpriv|mail|cron|uucp)'
-        replace: "#\\1"
-
-    # Optionally install clustershell
-    - name: Configure clustershell if enabled
-      block:
-        - name: Install clustershell package
-          ansible.builtin.dnf:
-            name: clustershell
+        - name: Define compute node forwarding
+          ansible.builtin.blockinfile:
+            block: |
+              "*.* action(type=\"omfwd\" Target=\"${sms_ip}\" Port=\"514\" " \
+              "Protocol=\"udp\")"
+            name: "{{ chroot_loc }}/etc/rsyslog.conf"
             state: present
-        - name: Backup existing clustershell groups file
-          ansible.builtin.command: mv /etc/clustershell/groups.d/local.cfg /etc/clustershell/groups.d/local.cfg.orig
-          args:
-            warn: false
-          ignore_errors: yes
-        - name: Create clustershell groups file
-          ansible.builtin.copy:
-            dest: /etc/clustershell/groups.d/local.cfg
-            content: |
-              adm: {{ sms_name }}
-              compute: {{ compute_prefix }}[1-{{ num_computes }}]
-              all: @adm,@compute
-      when: enable_clustershell | bool
-
-    # Optionally install genders and create genders file
-    - name: Configure genders if enabled
+        - name: Disable info logging
+          ansible.builtin.replace:
+            regexp: "^*.info|^authpriv.*|^mail.*|^cron.*|^local0.*|^local1.*|^local2.*|^local3.*|^local4.*|^local5.*|^local6.*|^local7.*"
+            replace: "#&"
+            name: "{{ chroot_loc }}/etc/rsyslog.conf"
+    - name: Add health check
       block:
-        - name: Install genders-ohpc package
+        - name: Install health check on master
           ansible.builtin.dnf:
-            name: genders-ohpc
+            name: 'nhc-ohpc'
             state: present
-        - name: Create /etc/genders file from template
-          ansible.builtin.copy:
-            dest: /etc/genders
-            content: |
-              {{ sms_name }}    sms
-              {% for node in compute_nodes %}
-              {{ node.name }}    compute,bmc={{ node.bmc }}
-              {% endfor %}
-      when: enable_genders | bool
-
-    # Optionally install magpie
-    - name: Install magpie-ohpc package
-      ansible.builtin.dnf:
-        name: magpie-ohpc
-        state: present
-      when: enable_magpie | bool
-
-    # Install and configure NHC
-    - name: Install nhc-ohpc on master
-      ansible.builtin.dnf:
-        name: nhc-ohpc
-        state: present
-
-    - name: Install nhc-ohpc in compute image
-      ansible.builtin.dnf:
-        installroot: "{{ chroot_dir }}"
-        name: nhc-ohpc
-        state: present
-
-    - name: Append NHC configuration to slurm.conf
-      ansible.builtin.blockinfile:
-        path: /etc/slurm/slurm.conf
-        marker: "# {mark} NHC CONFIG"
-        block: |
-          HealthCheckProgram=/usr/sbin/nhc
-          HealthCheckInterval=300
-
-    # Optionally update compute image for GEOPM support
-    - name: Configure GEOPM for compute image
+        - name: Install health check on compute
+          ansible.builtin.dnf:
+            installroot: "{{ chroot_loc }}"
+            name: 'nhc-ohpc'
+            state: present
+        - name: Register slurm health check
+          ansible.builtin.blockinfile:
+            block: |
+              HealthCheckProgram=/usr/sbin/nhc
+              HealthCheckInterval=300
+            name: /etc/slurm/slurm.conf
+            state: present
+    - name: Import important files
       block:
-        - name: Append intel_pstate=disable to kernel args
-          ansible.builtin.set_fact:
-            kargs: "{{ kargs }} intel_pstate=disable"
-        - name: Install GEOPM packages in compute image
-          ansible.builtin.dnf:
-            installroot: "{{ chroot_dir }}"
-            name:
-              - kmod-msr-safe-ohpc
-              - msr-safe-ohpc
-              - msr-safe-slurm-ohpc
-            state: present
-      when: enable_geopm | bool
-
-    # Import overlay files and build compute image
-    - name: Import overlay file /etc/subuid
-      ansible.builtin.command: wwctl overlay import generic /etc/subuid
-
-    - name: Import overlay file /etc/subgid
-      ansible.builtin.command: wwctl overlay import generic /etc/subgid
-
-    - name: Import overlay for chrony config into compute image
-      ansible.builtin.shell: echo "server {{ sms_ip }} iburst" | wwctl overlay import generic /etc/chrony.conf
-
-    - name: Create overlay directory for /etc/sysconfig
-      ansible.builtin.command: wwctl overlay mkdir generic /etc/sysconfig/
-
-    - name: Import overlay for slurmd configuration
-      ansible.builtin.shell: echo "SLURMD_OPTIONS=\"--conf-server {{ sms_ip }}\"" | wwctl overlay import generic /etc/sysconfig/slurmd
-
-    - name: Create overlay directory for /etc/munge with mode 0700
-      ansible.builtin.command: wwctl overlay mkdir generic --mode 0700 /etc/munge
-
-    - name: Import munge key overlay
-      ansible.builtin.command: wwctl overlay import generic /etc/munge/munge.key
-
-    - name: Set ownership for munge key in overlay
-      ansible.builtin.command: wwctl overlay chown generic /etc/munge/munge.key $(id -u munge) $(id -g munge)
-
-    - name: Set ownership for munge directory in overlay
-      ansible.builtin.command: wwctl overlay chown generic /etc/munge $(id -u munge) $(id -g munge)
-
-    # Assemble bootstrap image and register compute nodes
-    - name: Build container image for compute nodes
-      ansible.builtin.command: wwctl container build rocky-9.4
-
-    - name: Build overlay for compute image
-      ansible.builtin.command: wwctl overlay build
-
-    - name: Register compute nodes in cluster
-      ansible.builtin.command: >
-        wwctl node add --container=rocky-9.4 --ipaddr={{ item.ip }} --hwaddr={{ item.mac }} {{ item.name }}
-      loop: "{{ compute_nodes }}"
-
-    - name: Rebuild overlay after node registration
-      ansible.builtin.command: wwctl overlay build
-
-    - name: Run wwctl configure for complete setup
-      ansible.builtin.command: wwctl configure --all
-
-    - name: Enable and start munge service
-      ansible.builtin.systemd:
+        - name: Import subuid
+          ansible.builtin.command:
+            cmd: wwctl overlay import generic /etc/subuid
+        - name: Import subgid
+          ansible.builtin.command:
+            cmd: wwctl overlay import generic /etc/subgid
+        - name: Setup ntp on compute
+          ansible.builtin.command:
+            cmd: bash -c 'echo "server ${sms_ip} iburst" | wwctl overlay import generic <(cat) /etc/chrony.conf'
+        - name: Create sysconfig folder
+          ansible.builtin.command:
+            cmd: wwctl overlay mkdir generic /etc/sysconfig/
+        - name: Import slurm sysconfig
+          ansible.builtin.command:
+            cmd: bash -c 'wwctl overlay import generic <(echo SLURMD_OPTIONS="--conf-server {{ master_ip }}") /etc/sysconfig/slurmd'
+        - name: Configure Munge
+          block:
+            - name: Create munge folder
+              ansible.builtin.command:
+                cmd: bash -c 'wwctl overlay mkdir generic --mode 0700 /etc/munge'
+            - name: Import munge key
+              ansible.builtin.command:
+                cmd: wwctl overlay import generic /etc/munge/munge.key
+            - name: Set munge key permissions
+              ansible.builtin.command:
+                cmd: bash -c 'wwctl overlay chown generic /etc/munge/munge.key $(id -u munge) $(id -g munge)'
+            - name: Set folder permissions
+              ansible.builtin.command:
+                cmd: bash -c 'wwctl overlay chown generic /etc/munge $(id -u munge) $(id -g munge)'
+      ignore_errors: true
+    - name: Build container and overlay
+      block:
+        - name: Build container
+          ansible.builtin.command:
+            cmd: wwctl container build {{ local_image_name }}
+        - name: Build overlay
+          ansible.builtin.command:
+            cmd: wwctl overlay build
+    - name: Register nodes for provisioning
+      ansible.builtin.command:
+        cmd: bash -c 'wwctl node add --container={{ local_image_name }} --ipaddr={{ item.ip }} --hwaddr={{ item.mac }} {{ item.cname }}'
+      with_items: "{{ compute_nodes }}"
+    - name: Rebuild overlay
+      ansible.builtin.command:
+        cmd: wwctl overlay build
+    - name: Configure all
+      ansible.builtin.command:
+        cmd: wwctl configure --all
+    - name: Enable and start munge
+      ansible.builtin.systemd_service:
         name: munge
-        enabled: yes
         state: started
-
-    - name: Enable and start slurmctld service
-      ansible.builtin.systemd:
+        enabled: true
+    - name: Enable and start slurmctld
+      ansible.builtin.systemd_service:
         name: slurmctld
-        enabled: yes
         state: started
-
-    # (Skipping ipmi boot commands per user request)
-
-    # Install development tools
-    - name: Install development tools on master
-      ansible.builtin.dnf:
-        name:
-          - ohpc-autotools
-          - EasyBuild-ohpc
-          - hwloc-ohpc
-          - spack-ohpc
-          - valgrind-ohpc
-        state: present
-
-    - name: Install GNU14 compilers
-      ansible.builtin.dnf:
-        name: gnu14-compilers-ohpc
-        state: present
-
-    # Install MPI stacks (conditionally)
-    - name: Install default MPI stacks
-      ansible.builtin.dnf:
-        name:
-          - openmpi5-pmix-gnu14-ohpc
-          - mpich-ofi-gnu14-ohpc
-        state: present
-      when: enable_mpi_defaults | bool
-
-    - name: Install MVAPICH2 for InfiniBand
-      ansible.builtin.dnf:
-        name: mvapich2-gnu14-ohpc
-        state: present
-      when: enable_ib | bool
-
-    - name: Install MVAPICH2 for Omni-Path
-      ansible.builtin.dnf:
-        name: mvapich2-psm2-gnu14-ohpc
-        state: present
-      when: enable_opa | bool
-
-    # Install performance tools
-    - name: Install OHPC GNU14 performance tools
-      ansible.builtin.dnf:
-        name: ohpc-gnu14-perf-tools
-        state: present
-
-    - name: Install GEOPM performance tools (if enabled)
-      ansible.builtin.dnf:
-        name: ohpc-gnu14-geopm
-        state: present
-      when: enable_geopm | bool
-
-    - name: Install LMOD defaults for OpenMPI5
-      ansible.builtin.dnf:
-        name: lmod-defaults-gnu14-openmpi5-ohpc
-        state: present
-
-    # Install third party libraries and tools
-    - name: Install third party libraries on master
-      ansible.builtin.dnf:
-        name:
-          - ohpc-gnu14-serial-libs
-          - ohpc-gnu14-io-libs
-          - ohpc-gnu14-python-libs
-          - ohpc-gnu14-runtimes
-        state: present
-
-    - name: Install MPICH parallel libraries (if MPI defaults enabled)
-      ansible.builtin.dnf:
-        name: ohpc-gnu14-mpich-parallel-libs
-        state: present
-      when: enable_mpi_defaults | bool
-
-    - name: Install OpenMPI5 parallel libraries (if MPI defaults enabled)
-      ansible.builtin.dnf:
-        name: ohpc-gnu14-openmpi5-parallel-libs
-        state: present
-      when: enable_mpi_defaults | bool
-
-    - name: Install MVAPICH2 parallel libraries for IB
-      ansible.builtin.dnf:
-        name: ohpc-gnu14-mvapich2-parallel-libs
-        state: present
-      when: enable_ib | bool
-
-    - name: Install MVAPICH2 parallel libraries for OPA
-      ansible.builtin.dnf:
-        name: ohpc-gnu14-mvapich2-parallel-libs
-        state: present
-      when: enable_opa | bool
-
-    # Install Intel oneAPI tools (if enabled)
-    - name: Install Intel oneAPI toolkit and related packages
-      block:
-        - name: Install intel-oneapi-toolkit-release-ohpc
-          ansible.builtin.dnf:
-            name: intel-oneapi-toolkit-release-ohpc
-            state: present
-        - name: Import Intel GPG key
-          ansible.builtin.command: rpm --import https://yum.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB
-        - name: Install Intel compilers and MPI
-          ansible.builtin.dnf:
-            name:
-              - intel-compilers-devel-ohpc
-              - intel-mpi-devel-ohpc
-            state: present
-        - name: Install MVAPICH2 for Intel (if OPA enabled)
-          ansible.builtin.dnf:
-            name: mvapich2-psm2-intel-ohpc
-            state: present
-          when: enable_opa | bool
-        - name: Install OpenMPI5 PMIX for Intel
-          ansible.builtin.dnf:
-            name: openmpi5-pmix-intel-ohpc
-            state: present
-        - name: Install Intel serial, GEOPM, IO, perf, Python3, MPICH, MVAPICH2, OpenMPI5, and IMPI parallel libs
-          ansible.builtin.dnf:
-            name:
-              - ohpc-intel-serial-libs
-              - ohpc-intel-geopm
-              - ohpc-intel-io-libs
-              - ohpc-intel-perf-tools
-              - ohpc-intel-python3-libs
-              - ohpc-intel-mpich-parallel-libs
-              - ohpc-intel-mvapich2-parallel-libs
-              - ohpc-intel-openmpi5-parallel-libs
-              - ohpc-intel-impi-parallel-libs
-            state: present
-      when: enable_intel_packages | bool
-
-    # Pause to allow provisioning to complete
-    - name: Wait for provisioning to complete
+        enabled: true
+    - name: Confirm compute nodes booted
       ansible.builtin.pause:
-        seconds: "{{ provision_wait | default(30) }}"
+        prompt: "Did compute nodes boot successfully? (yes/no)"
+      register: user_confirmation
 
-    # Start resource manager services on master
-    - name: Enable and start munge service
-      ansible.builtin.systemd:
-        name: munge
-        enabled: yes
-        state: started
+    - name: Proceed if nodes booted
+      ansible.builtin.debug:
+        msg: "Continuing with the playbook as compute nodes have booted."
+      when: user_confirmation.user_input | lower == 'yes'
 
-    - name: Enable and start slurmctld service
-      ansible.builtin.systemd:
-        name: slurmctld
-        enabled: yes
-        state: started
+    - name: Abort if nodes did not boot
+      ansible.builtin.debug:
+        msg: "Aborting playbook as compute nodes did not boot."
+      when: user_confirmation.user_input | lower != 'yes'
+      failed_when: user_confirmation.user_input | lower != 'yes'
 
-    # Create a test user
-    - name: Create test user on master
-      ansible.builtin.user:
-        name: test
-        state: present
-
-    # Rebuild warewulf overlay and pause
-    - name: Rebuild warewulf overlay
-      ansible.builtin.command: wwctl overlay build
-
-    - name: Pause before ending play
-      ansible.builtin.pause:
-        seconds: 90
-
-  handlers:
-    - name: Restart chronyd
-      ansible.builtin.systemd:
-        name: chronyd
-        state: restarted
-    - name: Restart rsyslog
-      ansible.builtin.systemd:
-        name: rsyslog
-        state: restarted
