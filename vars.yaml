@@ -1,9 +1,9 @@
 repo_url: http://repos.openhpc.community/OpenHPC/3/EL_9/x86_64/ohpc-release-3-1.el9.x86_64.rpm
-ntp_server_address: pool.ntp.org
+ntp_server: pool.ntp.org
 internal_net: 10.10.1.0
 internal_CIDR: 24
 master_hostname: master
-compute_prefix: "node"
+compute_prefix: "node-"
 compute_number: 2
 internal_eth: ens19
 master_ip: 10.10.1.100
