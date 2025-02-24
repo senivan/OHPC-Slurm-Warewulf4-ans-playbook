@@ -1,0 +1,79 @@
+# repo_name: OpenHPC3.1
+# repo_url: http://repos.openhpc.community/OpenHPC/3/EL_9/x86_64/ohpc-release-3-1.el9.x86_64.rpm
+# ntp_server_address: pool.ntp.org
+# internal_net: 10.10.1.0
+# internal_CIDR: 24
+# master_hostname: master
+# compute_prefix: "node"
+# compute_number: 2
+# internal_eth: ens19
+# master_ip: 10.10.1.100
+# ipv4_gateway: 10.10.1.100
+# internal_netmask: 255.255.255.0
+
+# ssh_lock: false
+
+
+
+# compute_base_image: docker://ghcr.io/warewulf/warewulf-rockylinux:9
+# local_image_name: rocky-9.5
+# chroot_loc: /srv/warewulf/chroots/rocky-9.5/rootfs
+# compute_nodes:
+#   - cname: node-1
+#     ip: 10.10.1.101
+#     mac: BC:24:11:61:41:E7
+#   - cname: node-2
+#     ip: 10.10.1.102
+#     mac: BC:24:11:7D:74:3E
+# slurm_node_conf: "NodeName={{ compute_prefix }}[1-{{ compute_number }}] Sockets=1 CoresPerSocket=2 ThreadsPerCore=1"
+
+# provision_time: 300
+
+
+# ohpc_input_local: "/opt/ohpc/pub/doc/recipes/rocky9/input.local"
+ntp_server: "pool.ntp.org"
+sms_name: "master"
+update_slurm_nodeconfig: true
+compute_prefix: "compute"
+num_computes: 2
+slurm_node_config: "NodeName={{ compute_prefix }}[1-{{ num_computes }}] Sockets=1 CoresPerSocket=2 ThreadsPerCore=1"
+enable_ib: false
+enable_opensm: false
+enable_ipoib: false
+sms_ipoib: "192.168.100.1"
+ipoib_netmask: "255.255.255.0"
+enable_opa: false
+enable_opafm: false
+sms_eth_internal: "ens19"
+sms_ip: "10.10.1.100"
+internal_netmask: "255.255.255.0"
+internal_network: "10.10.1.0"
+c_ip_first: "10.10.1.101"
+c_ip_last: "10.10.1.102"
+ipv4_gateway: "10.10.1.100"
+dns_servers: "10.10.1.100"
+container_image_url: "ghcr.io/warewulf/warewulf-rockylinux:9"
+ohpc_release_rpm_url: "http://repos.openhpc.community/OpenHPC/3/EL_9/x86_64/ohpc-release-3-1.el9.x86_64.rpm"
+enable_intel_packages: false
+sysmgmtd_host: "sysmgmt.example.com"
+compute_nodes:
+  - name: "compute01"
+    ip: "10.10.1.101"
+    mac: "BC:24:11:61:41:E7"
+    # bmc: "00:aa:bb:cc:dd:ee"
+  - name: "compute02"
+    ip: "10.10.1.102"
+    mac: "BC:24:11:7D:74:3E"
+    # bmc: "00:aa:bb:cc:dd:ff"
+enable_clustershell: false
+enable_genders: false
+enable_magpie: false
+enable_geopm: false
+kargs: ""
+enable_kargs: false
+compute_regex: "compute.*"
+provision_wait: 600
+enable_mpi_defaults: true
+enable_beegfs_client: false
+beegfs_repo_url: "https://www.beegfs.io/release/beegfs_7.4.5/dists/beegfs-rhel9.repo"
+mgs_fs_name: "mgs_fs_name_placeholder"
