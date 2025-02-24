@@ -25,6 +25,7 @@
           ansible.builtin.dnf:
             name: "{{ repo_url }}"
             state: present
+            disable_gpg_check: true
         - name: Install dnf-plugins-core
           ansible.builtin.dnf:
             name: "dnf-plugins-core"
