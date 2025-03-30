@@ -1,3 +1,5 @@
+# EXAMPLE VARS FILE
+# This file is used to set the variables for the Ansible playbook.
 repo_url: http://repos.openhpc.community/OpenHPC/3/EL_9/x86_64/ohpc-release-3-1.el9.x86_64.rpm
 ntp_server: pool.ntp.org
 internal_net: 10.10.1.0
@@ -10,9 +12,11 @@ master_ip: 10.10.1.100
 ipv4_gateway: 10.10.1.100
 internal_netmask: 255.255.255.0
 
+# flags
+enable_infiniband: false
+master_ipoib: 10.100.100.1
 ssh_lock: false
-
-
+# container_package_file: 
 
 compute_base_image: docker://ghcr.io/warewulf/warewulf-rockylinux:9
 local_image_name: rocky-9.5
@@ -27,4 +31,8 @@ slurm_node_conf: "NodeName={{ compute_prefix }}[1-{{ compute_number }}] Sockets=
 
 provision_time: 300
 
-
+# open OnDemand configs
+ood_install_method: "package"
+ood_public_hostname: "ondemand.test.com"
+ood_web_port: 80
+ood_ssl_enable: false
