@@ -88,6 +88,12 @@
             regexp: "^NodeName=.*$"
             replace: "#NodeName={{ compute_prefix }}[1-{{ compute_number }}]"
             name: /etc/slurm/slurm.conf
+        - name: Add node names
+          ansible.builtin.lineinfile:
+            line: "NodeName={{ compute_prefix }}[1-{{ compute_number }}]"
+            state: present
+            insertafter: "^#NodeName=.*$"
+            name: /etc/slurm/slurm.conf
         - name: Add node host
           ansible.builtin.lineinfile:
             line: "{{ slurm_node_conf }}"
@@ -99,6 +105,31 @@
             name: /etc/slurm/slurm.conf
             regexp: "^PartitionName=normal Nodes=.*$"
             replace: "PartitionName=normal Nodes={{ compute_prefix }}[1-{{ compute_number }}] Default=YES MaxTime=24:00:00 State=UP Oversubscribe=EXCLUSIVE"
+    - name: Add Infiniband support
+      block:
+        - name: "Add Infiniband support"
+          ansible.builtin.dnf:
+            name: "@InfiniBand Support"
+            state: present
+        - name: "Load IB services"
+          ansible.builtin.shell:
+            cmd: "udevadm trigger --type=devices --action=add"
+        - name: "Restart services"
+          ansible.builtin.systemd_service:
+            name: "rdma-load-modules@infiniband.service"
+            state: restarted
+        - name: "Copy default config"
+          ansible.builtin.copy:
+            src: /opt/ohpc/pub/examples/network/centos/ifcfg-ib0
+            dest: /etc/sysconfig/network-scripts/ifcfg-ib0
+            remote_src: true
+        - name: "Define local IPoIB address"
+          ansible.builtin.replace:
+            regexp: "^master_ipoib$"
+            replace: "{{ master_ipoib }}"
+            name: /etc/sysconfig/network-scripts/ifcfg-ib0
+      when: enable_infiniband
+
     - name: Complete Basic Warewulf setup for master
       block:
         - name: Set internal interface UP
@@ -178,6 +209,10 @@
             name: warewulfd
             state: started
             enabled: true
+        - name: Set internal interface IP
+          ansible.builtin.command:
+            cmd: bash -c 'ip addr add {{ master_ip }}/{{ internal_CIDR }} broadcast + dev {{ internal_eth }}'
+          ignore_errors: true
         - name: Run configure all
           ansible.builtin.command:
             cmd: wwctl configure --all
@@ -382,6 +417,10 @@
     - name: Rebuild overlay
       ansible.builtin.command:
         cmd: wwctl overlay build
+    - name: Set internal interface IP
+      ansible.builtin.command:
+        cmd: bash -c 'ip addr add {{ master_ip }}/{{ internal_CIDR }} broadcast + dev {{ internal_eth }}'
+      ignore_errors: true
     - name: Configure all
       ansible.builtin.command:
         cmd: wwctl configure --all
@@ -472,3 +511,7 @@
       ansible.builtin.reboot:
         pre_reboot_delay: 15
         reboot_timeout: 600
+    - name: Install open OnDemand
+      import_role:
+        name: ood
+
