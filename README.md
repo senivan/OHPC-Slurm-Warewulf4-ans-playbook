@@ -5,12 +5,12 @@
 This repository contains an Ansible playbook for setting up a cluster using Warewulf4, Slurm, and OpenHPC. The playbook automates the installation and configuration of the necessary components to create a fully functional HPC cluster.
 
 ## Prerequisites
-- All nodes should be running rocky linux. The playbook has been tested on Rocky Linux 9.4.
+- Master node should be running rocky linux. The playbook has been tested on Rocky Linux 9.4 and 9.5.
 
 ## Instructions
-1. Look through the `inventory` file and update the IP addresses and hostnames of the nodes in your cluster.
-2. Ensure that the Ansible control node has SSH access to all nodes in the cluster.
-3. Install Ansible on the control node if it is not already installed.
+1. Look through the `inventory` file and update the IP address and hostname of the master node.
+2. Ensure that the Ansible control node has SSH access to the master node.
+3. Your external computer running ansbile playbook, should have ansible installed
 4. Now go through the vars.yaml file and update the variables to match your cluster configuration. The variables include:
     - `repo_url`: The URL of the OpenHPC repository.
     - `ntp_server`: The NTP server to use for time synchronization.
@@ -47,5 +47,4 @@ ansible-playbook -i inventory.ini Playbook.yaml -vv
 
 ## Known issues
 - The playbook has been tested on Rocky Linux 9.4. It may not work on other versions of Rocky Linux or other distributions(it *should* work on rocky linux >= 9).
-- There are some issues noted with network interfaces. They sometimes go down, or ip addresses fail to be assigned. As of right now we have not tested this playbook on a real cluster, so we are not sure if this is a problem with the playbook or with the network interfaces. If you encounter this issue, please open an issue on the GitHub repository.
 - Open OnDemand installation has not been tested at all. If you encounter issues with Open OnDemand, please open an issue on the GitHub repository.
