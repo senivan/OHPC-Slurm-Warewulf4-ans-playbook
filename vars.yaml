@@ -2,14 +2,14 @@
 # This file is used to set the variables for the Ansible playbook.
 repo_url: http://repos.openhpc.community/OpenHPC/3/EL_9/x86_64/ohpc-release-3-1.el9.x86_64.rpm
 ntp_server: pool.ntp.org
-internal_net: 10.10.1.0
+internal_net: 192.168.110.0
 internal_CIDR: 24
 master_hostname: master
-compute_prefix: "node-"
+compute_prefix: "node-00"
 compute_number: 2
-internal_eth: ens19
-master_ip: 10.10.1.100
-ipv4_gateway: 10.10.1.100
+internal_eth: enp2s0f0
+master_ip: 192.168.110.1
+ipv4_gateway: 192.168.110.1
 internal_netmask: 255.255.255.0
 
 # flags
@@ -18,21 +18,29 @@ master_ipoib: 10.100.100.1
 ssh_lock: false
 # container_package_file: 
 
-compute_base_image: docker://ghcr.io/warewulf/warewulf-rockylinux:9
-local_image_name: rocky-9.5
-compute_nodes:
-  - cname: node-1
-    ip: 10.10.1.101
-    mac: BC:24:11:61:41:E7
-  - cname: node-2
-    ip: 10.10.1.102
-    mac: BC:24:11:7D:74:3E
-slurm_node_conf: "NodeName={{ compute_prefix }}[1-{{ compute_number }}] Sockets=1 CoresPerSocket=2 ThreadsPerCore=1"
+compute_base_image: docker://ghcr.io/warewulf/warewulf-rockylinux:9 # base image for Warewulf
+local_image_name: rocky-9.5 # local image name for Warewulf
+compute_nodes: # list of compute nodes to be provisioned
+  # compute 04
+  - cname: node-001
+    ip: 192.168.110.5
+    mac: 00:25:90:CE:33:18
+  - cname: node-002
+    ip: 192.168.110.6
+    mac: 00:25:90:C9:CA:A4
+slurm_node_conf: "NodeName={{ compute_prefix }}[1-{{ compute_number }}] Sockets=2 CoresPerSocket=6 ThreadsPerCore=2" # Slurm node configuration
 
-provision_time: 300
+provision_time: 300 # time in seconds to wait for provisioning to complete
 
 # open OnDemand configs
-ood_install_method: "package"
-ood_public_hostname: "ondemand.test.com"
-ood_web_port: 80
-ood_ssl_enable: false
+ood_install_method: "package" # "package" or "source"
+ood_public_hostname: "ondemand.test.com" # public hostname for Open OnDemand
+ood_web_port: 80 # web port for Open OnDemand
+ood_ssl_enable: false # enable SSL for Open OnDemand
+
+
+# Storage server configs
+config_storage_server: true                # set to true if you want to configure a storage server with the main Playbook
+storage_ip: 192.168.110.2                  # storage server IP
+storage_hostname: storage                  # storage server hostname
+provision_dir: /var/lib/warewulf/provision # master node will mount and write here

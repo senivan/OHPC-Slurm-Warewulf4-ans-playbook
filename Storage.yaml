@@ -5,3 +5,36 @@
   vars_files:
     - vars.yaml
   tasks:
+  - name: Install nfs server package
+    ansible.builtin.package:
+      name: nfs-kernel-server
+      state: present
+  - name: Ensure provision directory exists
+    file:
+      path: "{{ provision_dir }}"
+      state: directory
+      owner: root
+      group: root
+      mode: "0755"
+
+  - name: Configure NFS export for Warewulf provision directory
+    lineinfile:
+      path: /etc/exports
+      create: yes
+      line: "{{ provision_dir }} {{ cluster_net }}(rw,sync,no_root_squash,no_subtree_check)"
+      state: present
+      insertafter: EOF
+  - name: Add rootfs exports for each compute node
+    ansible.builtin.lineinfile:
+      path: /etc/exports
+      line: "{{ provision_dir }}/rootfs/{{ item.cname }} {{ internal_net }}/{{ internal_CIDR }}(ro,no_root_squash,no_subtree_check)"
+      state: present
+    loop: "{{ compute_nodes }}"
+  - name: Reload NFS exports
+    command: exportfs -ra
+
+  - name: Ensure NFS services are running and enabled
+    service:
+      name: nfs-kernel-server
+      state: restarted
+      enabled: yes
