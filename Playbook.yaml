@@ -566,7 +566,7 @@
       failed_when: user_confirmation.user_input | lower != 'yes'
 
 
-    # ===== Instll dev libraries and tools =====
+    # ===== Install dev libraries and tools =====
     - name: Install OpenHPC Development Components
       block:
         - name: Install dev-tools
