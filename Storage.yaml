@@ -1,0 +1,7 @@
+---
+- name: Install and configure Storage server
+  hosts: storage
+  become: true
+  vars_files:
+    - vars.yaml
+  tasks:

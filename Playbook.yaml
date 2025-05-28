@@ -17,6 +17,7 @@
             cmd: grubby --update-kernel ALL --args selinux=0
           register: selinux_status
         - name: Update base system
+          ignore_errors: true
           ansible.builtin.dnf:
             name: "*"
             state: latest
@@ -262,6 +263,13 @@
         - name: Setup ssh keys
           ansible.builtin.command:
             cmd: bash /etc/profile.d/ssh_setup.sh
+    - name: Add storage ip to hosts
+      ansible.builtin.lineinfile:
+        line: "{{ storage_ip }} {{ storage_hostname }}"
+        state: present
+        insertafter: EOF
+        name: /etc/hosts
+      when: config_storage_server | bool
     - name: Define compute image for provisioning
       block:
         - name: Pull base image
