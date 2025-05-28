@@ -26,6 +26,10 @@
             pre_reboot_delay: 15
             reboot_timeout: 600
           when: selinux_status.changed
+    - name: Setup Storage server
+      command:
+        cmd: ansible-playbook -i inventory.ini Storage.yaml -vv
+      when: config_storage_server | bool
     - name: Install OHPC Components
       block:
         - name: Enable OHPC repo
