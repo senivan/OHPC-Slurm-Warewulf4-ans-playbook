@@ -1,3 +1,7 @@
+# ====== Ansible Playbook for Warewulf Cluster Setup ======
+# This playbook is designed to set up a Warewulf cluster with OpenHPC components.
+# It includes the installation and configuration of the master node, compute nodes, and optional storage server.
+
 ---
 - name: Install and configure Master Host
   hosts: master
@@ -5,56 +9,79 @@
   vars_files:
     - vars.yaml
   tasks:
+    # ===== HOST PRE SETUP =====
+    # In this block we focus on the initial setup of the host.
     - name: Host pre-setup
       block:
-        - name: Disable firewalld
+        # Disabling firewalld, because it can interfere with Warewulf
+        - name: Disable firewalld 
           ansible.builtin.systemd_service:
             name: firewalld
             state: stopped
             enabled: false
+        # Disabling SELinux for simplicity, as it can complicate Warewulf setup
         - name: Disable SELinux
           ansible.builtin.command:
             cmd: grubby --update-kernel ALL --args selinux=0
           register: selinux_status
+        # Updating the base system to ensure all packages are up to date
         - name: Update base system
           ignore_errors: true
           ansible.builtin.dnf:
             name: "*"
             state: latest
+        # reboot so all changes can take effect
         - name: Reboot to apply changes
           ansible.builtin.reboot:
             pre_reboot_delay: 15
             reboot_timeout: 600
           when: selinux_status.changed
+    # Setup Storage server, look into Storage.yaml for more details
     - name: Setup Storage server
       command:
         cmd: ansible-playbook -i inventory.ini Storage.yaml -vv
       when: config_storage_server | bool
+
+    
+    # ===== INSTALLING OPEN HPC =====
+    # in this section we will install most of the needed components from OpenHPC
     - name: Install OHPC Components
       block:
+        # Adding the OpenHPC repository to the system
         - name: Enable OHPC repo
           ansible.builtin.dnf:
             name: "{{ repo_url }}"
             state: present
             disable_gpg_check: true
+        # Installing dnf-plugins-core to manage repositories
         - name: Install dnf-plugins-core
           ansible.builtin.dnf:
             name: "dnf-plugins-core"
             state: present
+        # Enabling the crb repository, which is required for some OpenHPC packages
         - name: Enable crb repo
           ansible.builtin.command:
             cmd: dnf config-manager --set-enabled crb
+          changed_when: false
+        # Installing the OpenHPC base package and other required components
         - name: Add provisioning services
           ansible.builtin.dnf:
             name: ['ohpc-base', 'warewulf-ohpc', 'hwloc-ohpc']
             state: present
+
+
+    # ===== CHRONY SETUP =====
+    # In this section we will set up the chrony NTP server for time synchronization
+    # It is required because compute nodes have no access to the internet
     - name: Setup chrony ntp server
       block:
+        # Enable and start the chronyd service
         - name: Enable chrony
           ansible.builtin.systemd_service:
             name: chronyd
             state: started
             enabled: true
+        # Configure chronyd
         - name: Change config with blockinfile
           ansible.builtin.blockinfile:
             name: /etc/chrony.conf
@@ -63,16 +90,23 @@
               server {{ ntp_server }}
               allow {{ internal_net }}/{{ internal_CIDR }}
             state: present
+        # Ensure the chrony service is restarted to apply the new configuration
         - name: Restart chrony
           ansible.builtin.systemd_service:
             name: chronyd
             state: restarted
+    
+    # ===== Slurmctld SETUP =====
+    # In this section we will set up the Slurm resource manager
+    # It is used to manage compute nodes and their resources
     - name: Add resource management on master
       block:
+        # Installing Slurm server components
         - name: Install slurm server
           ansible.builtin.dnf:
             name: 'ohpc-slurm-server'
             state: present
+        # Copy example slurm.conf and cgroup configuration files
         - name: Copy example slurm.conf
           ansible.builtin.copy:
             src: /etc/slurm/slurm.conf.ohpc
@@ -83,33 +117,42 @@
             src: /etc/slurm/cgroup.conf.example
             dest: /etc/slurm/cgroup.conf
             remote_src: true
+        # Change the SlurmctldHost to the master hostname
         - name: Change server host
           ansible.builtin.replace:
             regexp: "^SlurmctldHost=.*$"
             replace: "SlurmctldHost={{ master_hostname }}"
             name: /etc/slurm/slurm.conf
+        # Comment out the default node host
         - name: Comment out node host
           ansible.builtin.replace:
             regexp: "^NodeName=.*$"
             replace: "#NodeName={{ compute_prefix }}[1-{{ compute_number }}]"
             name: /etc/slurm/slurm.conf
+        # Add node names and host configuration
         - name: Add node names
           ansible.builtin.lineinfile:
             line: "NodeName={{ compute_prefix }}[1-{{ compute_number }}]"
             state: present
             insertafter: "^#NodeName=.*$"
             name: /etc/slurm/slurm.conf
+       # Add node configurations. TODO: allow to mark each compute node with their partition type
         - name: Add node host
           ansible.builtin.lineinfile:
             line: "{{ slurm_node_conf }}"
             state: present
             insertafter: EOF
             name: /etc/slurm/slurm.conf
+       # Replace the partition configuration with the one that includes all compute nodes
         - name: Fix partition config
           ansible.builtin.replace:
             name: /etc/slurm/slurm.conf
             regexp: "^PartitionName=normal Nodes=.*$"
             replace: "PartitionName=normal Nodes={{ compute_prefix }}[1-{{ compute_number }}] Default=YES MaxTime=24:00:00 State=UP Oversubscribe=EXCLUSIVE"
+    
+
+    # ===== Infiniband SETUP =====
+    # This section is optional and will set up Infiniband support if enabled
     - name: Add Infiniband support
       block:
         - name: "Add Infiniband support"
@@ -135,15 +178,22 @@
             name: /etc/sysconfig/network-scripts/ifcfg-ib0
       when: enable_infiniband
 
+
+    # ===== WAREWULF SETUP =====
+    # In this section we will set up Warewulf for provisioning compute nodes
     - name: Complete Basic Warewulf setup for master
       block:
+        # Ensure internal interface state is UP
         - name: Set internal interface UP
           ansible.builtin.command:
             cmd: ip link set {{ internal_eth }} up
+        # Set ip address
         - name: Set internal interface IP
           ansible.builtin.command:
             cmd: bash -c 'ip addr add {{ master_ip }}/{{ internal_CIDR }} broadcast + dev {{ internal_eth }}'
           ignore_errors: true
+
+        # Change Warewulf configurations:
         - name: Replace ipaddr in Warewulf config
           ansible.builtin.replace:
             regexp: "^ipaddr:.*$"
@@ -179,6 +229,7 @@
             regexp: "^mount: false$"
             replace: "mount: true"
             name: /etc/warewulf/warewulf.conf
+        # Use NetworkManager to manage the internal interface, this is required for persistent IP configuration
         - name: Make ip changes persistent using NetworkManager
           ansible.builtin.nmcli:
             conn_name: "{{ internal_eth }}"
@@ -187,6 +238,7 @@
             ip4: "{{ master_ip }}/{{ internal_CIDR }}"
             autoconnect: true
             state: present
+        # Create the startup script that will run on boot
         - name: Create the startup script
           copy:
             dest: "/usr/local/bin/startup.sh"
@@ -227,6 +279,8 @@
             name: warewulfd
             state: started
             enabled: true
+
+        # Set up Warewulf profiles and overlays
         - name: Set netmask with wwctl
           ansible.builtin.command:
             cmd: wwctl profile set -y default --netmask {{ internal_netmask }}
@@ -264,9 +318,11 @@
         - name: Run configure all
           ansible.builtin.command:
             cmd: wwctl configure --all
+        # Set up SSH keys for Warewulf
         - name: Setup ssh keys
           ansible.builtin.command:
             cmd: bash /etc/profile.d/ssh_setup.sh
+    # Add storage server IP to /etc/hosts if configured
     - name: Add storage ip to hosts
       ansible.builtin.lineinfile:
         line: "{{ storage_ip }} {{ storage_hostname }}"
@@ -274,6 +330,8 @@
         insertafter: EOF
         name: /etc/hosts
       when: config_storage_server | bool
+    # ===== COMPUTE NODE PROVISIONING =====
+    # Pull rocky 9 image and install all required components
     - name: Define compute image for provisioning
       block:
         - name: Pull base image
@@ -292,11 +350,7 @@
               systemctl enable munge
               systemctl enable slurmd
               EOF
-        # - name: Ensure everything is installed
-        #   ansible.builtin.dnf:
-        #     installroot: "{{ chroot_loc }}"
-        #     name: "{{ lookup('file', 'con_req.txt').splitlines() }}"
-        #     state: present
+    # ===== Increase memory limits =====
     - name: Increase memory limits
       block:
         - name: Increase master memory limits
@@ -309,6 +363,7 @@
             regexp: "^# End of file$"
             replace: "* soft memlock unlimited\n* hard memlock unlimited\n# End of file"
             name: "{{ chroot_loc }}/etc/security/limits.conf"
+    # Lock ssh access to compute nodes only for users with jobs running on that node
     - name: Lock ssh
       ansible.builtin.lineinfile:
         line: "account required pam_slurm.so"
@@ -316,6 +371,9 @@
         insertafter: "EOF"
         name: "{{ chroot_loc }}/etc/pam.d/sshd"
       when: ssh_lock
+
+
+    # ===== Configure Rsyslog for system logs forwarding =====
     - name: Enable system logs forwarding
       block:
         - name: Append config file
@@ -403,6 +461,7 @@
               HealthCheckInterval=300
             name: /etc/slurm/slurm.conf
             state: present
+    # ===== Import required files into overlay =====
     - name: Import important files
       ignore_errors: true
       block:
@@ -456,6 +515,7 @@
             - name: Set folder permissions
               ansible.builtin.command:
                 cmd: bash -c 'wwctl overlay chown generic /etc/munge $(id -u munge) $(id -g munge)'
+    # ===== Build container =====
     - name: Build container and overlay
       block:
         - name: Build container
@@ -504,7 +564,9 @@
         msg: "Aborting playbook as compute nodes did not boot."
       when: user_confirmation.user_input | lower != 'yes'
       failed_when: user_confirmation.user_input | lower != 'yes'
-    
+
+
+    # ===== Install dev libraries and tools =====
     - name: Install OpenHPC Development Components
       block:
         - name: Install dev-tools
@@ -531,6 +593,7 @@
           ansible.builtin.dnf:
             name: ['nano','cmake', 'make', 'git', 'ohpc-gnu14-serial-libs', 'ohpc-gnu14-io-libs', 'ohpc-gnu14-python-libs', 'ohpc-gnu14-runtimes', 'ohpc-gnu14-mpich-parallel-libs', 'ohpc-gnu14-openmpi5-parallel-libs']
             state: present
+    # ===== Start Slurm on master and compute nodes =====
     - name: Resource manager startup
       block:
         - name: Start munge
