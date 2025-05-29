@@ -7,34 +7,90 @@
   tasks:
   - name: Install nfs server package
     ansible.builtin.package:
-      name: nfs-kernel-server
+      name: [nfs-utils, policycoreutils-python-utils, mdadm]
       state: present
-  - name: Ensure provision directory exists
-    file:
-      path: "{{ provision_dir }}"
+  - name: Create group warewulf
+    ansible.builtin.group:
+      name: warewulf
+      state: present
+  - name: Create chroots directory
+    ansible.builtin.file:
+      path: "/warewulf/chroots"
       state: directory
+      mode: '0755'
+      owner: root
+      group: warewulf
+  - name: Create tftpboot directory
+    ansible.builtin.file:
+      path: "/warewulf/tftpboot"
+      state: directory
+      mode: '0755'
+      owner: root
+      group: warewulf
+  - name: Create single home for all nodes
+    ansible.builtin.file:
+      path: "/storage/home"
+      state: directory
+      mode: '0755'
       owner: root
       group: root
-      mode: "0755"
-
-  - name: Configure NFS export for Warewulf provision directory
-    lineinfile:
-      path: /etc/exports
-      create: yes
-      line: "{{ provision_dir }} {{ cluster_net }}(rw,sync,no_root_squash,no_subtree_check)"
-      state: present
-      insertafter: EOF
-  - name: Add rootfs exports for each compute node
-    ansible.builtin.lineinfile:
-      path: /etc/exports
-      line: "{{ provision_dir }}/rootfs/{{ item.cname }} {{ internal_net }}/{{ internal_CIDR }}(ro,no_root_squash,no_subtree_check)"
-      state: present
-    loop: "{{ compute_nodes }}"
-  - name: Reload NFS exports
-    command: exportfs -ra
-
-  - name: Ensure NFS services are running and enabled
-    service:
-      name: nfs-kernel-server
-      state: restarted
-      enabled: yes
+  - name: Create storage directory
+    ansible.builtin.file:
+      path: "/storage/data"
+      state: directory
+      mode: '0755'
+      owner: root
+      group: root
+  - name: SELinux context for directories
+    block:
+      - name: Set SELinux context for chroots directory
+        ansible.builtin.command:
+          cmd: semanage fcontext -a -t nfs_t "/warewulf/chroots(/.*)?"
+      - name: Set SELinux context for tftpboot directory
+        ansible.builtin.command:
+          cmd: semanage fcontext -a -t nfs_t "/warewulf/tftpboot(/.*)?"
+      - name: Set SELinux context for home directory
+        ansible.builtin.command:
+          cmd: semanage fcontext -a -t nfs_t "/storage/home(/.*)?"
+      - name: Set SELinux context for data directory
+        ansible.builtin.command:
+          cmd: semanage fcontext -a -t nfs_t "/storage/data(/.*)?"
+      - name: Restore SELinux context
+        ansible.builtin.command:
+          cmd: restorecon -Rv /warewulf/chroots /warewulf/tftpboot /storage/home /storage/data
+  - name: Setup NFS exports
+    block:
+      - name: Add NFS export for chroots directory
+        ansible.builtin.lineinfile:
+          line: /warewulf/chroots {{ master_ip }}(rw,sync,no_root_squash) {{ internal_net }}/{{ internal_CIDR }}(ro,sync,root_squash)
+          path: /etc/exports
+          insertafter: EOF
+      - name: Add NFS export for tftpboot directory
+        ansible.builtin.lineinfile:
+          line: /warewulf/tftpboot {{ master_ip }}(rw,sync,no_root_squash) {{ internal_net }}/{{ internal_CIDR }}(ro,sync,root_squash)
+          path: /etc/exports
+          insertafter: EOF
+      - name: Add NFS export for home directory
+        ansible.builtin.lineinfile:
+          line: /storage/home {{ master_ip }}(rw,sync,no_root_squash) {{ internal_net }}/{{ internal_CIDR }}(ro,sync,root_squash)
+          path: /etc/exports
+          insertafter: EOF
+      - name: Add NFS export for data directory
+        ansible.builtin.lineinfile:
+          line: /storage/data {{ master_ip }}(rw,sync,no_root_squash) {{ internal_net }}/{{ internal_CIDR }}(ro,sync,root_squash)
+          path: /etc/exports
+          insertafter: EOF
+  - name: Ensure NFS service is running
+    ansible.builtin.systemd:
+      name: nfs-server
+      state: started
+      enabled: true
+  - name: Ensure rpcbind service is running
+    ansible.builtin.systemd:
+      name: rpcbind
+      state: started
+      enabled: true
+  - name: Update NFS exports
+    ansible.builtin.command:
+      cmd: exportfs -ra
+  
