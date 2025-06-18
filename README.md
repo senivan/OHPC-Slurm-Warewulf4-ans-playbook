@@ -1,8 +1,11 @@
 # OHPC+Slurm+Warewulf4 Cluster Setup Playbook
 
-
 ## Overview
 This repository contains an Ansible playbook for setting up a cluster using Warewulf4, Slurm, and OpenHPC. The playbook automates the installation and configuration of the necessary components to create a fully functional HPC cluster.
+
+## Report
+The report for this project can be found in the `Report.pdf` file included in this repository, as well as on Overleaf via the following link: https://www.overleaf.com/read/ryrnbkwrvkxb#9fb687.
+
 
 ## Prerequisites
 - Master node should be running rocky linux. The playbook has been tested on Rocky Linux 9.4 and 9.5.
